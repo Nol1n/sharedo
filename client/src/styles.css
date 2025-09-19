@@ -1,0 +1,50 @@
+:root { --bg: #f7f7f5; --card: #fff; --border: #e9e7e4; --text: #222; --muted: #666; --accent: #6c63ff; }
+*{ box-sizing: border-box }
+body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background: var(--bg); color: var(--text) }
+.app { display:flex; min-height:100vh }
+.sidebar { width: 220px; border-right: 1px solid var(--border); padding: 20px; background: #fcfbf8 }
+.sidebar .logo { font-size: 20px; margin-top: 0; }
+.sidebar nav { display:flex; flex-direction: column; gap:10px; margin: 20px 0 }
+.sidebar a { color: var(--text); text-decoration: none; padding: 8px 10px; border-radius: 8px; }
+.sidebar a:hover { background: #f1efe9 }
+.userbox { margin-top:auto; display:flex; flex-direction: column; align-items: center; gap:8px }
+.userbox img { width: 48px; height: 48px; border-radius: 50%; border: 2px dashed #c9c6be }
+.userbox button { width: 100% }
+.content { flex:1; padding: 32px; }
+h2 { margin-top: 0 }
+.row { display:flex; gap: 14px; align-items: center; margin: 14px 0 }
+.row.justify { justify-content: space-between }
+.col { display:flex; flex-direction: column; gap:8px }
+input, button, textarea, select { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--card) }
+textarea { min-height: 90px; resize: vertical }
+button { cursor: pointer; background: var(--card) }
+button:hover { background: #f5f3ef }
+button.danger { border-color: #ffb4b4; color: #a90000 }
+.centered { display:grid; place-items:center; min-height:100vh }
+.card { background: var(--card); border: 1px solid var(--border); padding: 28px; border-radius: 16px; box-shadow: 0 2px 0 #ebe8e1; display:flex; flex-direction: column; gap: 12px }
+.error { color: #a90000 }
+.muted { color: var(--muted); font-size: 12px }
+.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 10px }
+.idea { position: relative; border: 1px dashed #d4d0c3 }
+.idea img { width:100%; height:140px; object-fit:cover; border-radius: 10px }
+.idea .title { font-weight: 600; margin: 10px 0 }
+.idea .actions { display:flex; gap:8px }
+.avatar-xl { width: 96px; height: 96px; border-radius: 50%; border: 3px dashed #d1cdc0 }
+.drawer { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: #fff }
+.chat { display:flex; flex-direction: column; height: calc(100vh - 100px); gap: 12px }
+.chatWrap { display:flex; gap:16px; height: calc(100vh - 140px) }
+.roomsSidebar { width: 240px; border: 1px solid var(--border); border-radius: 16px; background: #fff; padding: 12px; display:flex; flex-direction: column; gap:8px; height: 100%; overflow: auto }
+.roomsSidebar .roomItem { display:flex; gap:10px; align-items:center; padding:8px; border-radius: 10px; cursor: pointer; border: 1px solid transparent }
+.roomsSidebar .roomItem.active { background:#efede8; border-color:#e1ddd4 }
+.roomsSidebar img { width:28px; height:28px; border-radius:50%; border:1px dashed #ccc }
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.25); display:grid; place-items: center }
+.chatWindow { flex: 1; overflow: auto; border: 1px solid var(--border); border-radius: 16px; background: #fff; padding: 16px }
+.composer { margin-top: 0; display:flex; gap:12px }
+.msg { display:flex; gap:12px; align-items: flex-start; margin: 10px 0 }
+.msg img { width: 32px; height: 32px; border-radius: 50%; border: 1px dashed #cfcabf }
+.msg .bubble { background: #faf9f6; border: 1px solid var(--border); border-radius: 16px; padding: 10px 12px; max-width: 70% }
+.chat .roombar { display:flex; gap:10px; align-items:center }
+.chat .rooms { display:flex; gap:8px; flex-wrap: wrap }
+.pill { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; background: #fff; cursor: pointer }
+.pill.active { background: #efede8; border-color: #d9d5cc }
+.msg .meta { color: var(--muted); font-size: 12px; margin-bottom: 2px }
