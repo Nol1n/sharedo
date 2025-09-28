@@ -228,135 +228,270 @@ export default function ChatPage(){
   }
 
   return (
-    <div className="chat">
-      <div className="roombar">
-        <div className="rooms">
+    <div className="discord-chat">
+      {/* Server Sidebar */}
+      <div className="server-sidebar">
+        <div className="server-list">
           {rooms.map(r=> (
-            <span key={r.id} className={'pill'+(r.id===active?' active':'')} onClick={()=>setActive(r.id)}>
-              {r.imageUrl && <img src={r.imageUrl} style={{ width: 16, height: 16, borderRadius: 4, marginRight: 6 }} />}
-              {r.name}
-            </span>
-          ))}
-        </div>
-        <button onClick={()=>setShowCreate(true)}>+ New room</button>
-      </div>
-      <div className="chatWindow">
-        {roomDetails?.description && (
-          <div className="muted" style={{marginBottom:12}}>{roomDetails.description}</div>
-        )}
-        {msgs.map(m=> (
-          <div key={m.id} className="msg" style={{flexDirection: m.senderId===user?.id?'row-reverse':'row'}}>
-            <img src={m.avatarUrl || 'https://api.dicebear.com/7.x/thumbs/svg?seed='+ (m.senderName||'friend')} />
-            <div className="bubble" style={{background: m.senderId===user?.id?'#edeaf1':'#faf9f6'}}>
-              <div className="meta"><strong>{m.senderName||m.senderId.slice(0,6)}</strong> · {new Date(m.timestamp).toLocaleTimeString()}</div>
-              <div className="text">{m.text}</div>
-            </div>
-          </div>
-        ))}
-        <div ref={endRef} />
-      </div>
-      <div className="composer">
-        <input value={text} onChange={(e:any)=>setText(e.target.value)} placeholder="Type a message" onKeyDown={e=>{ if(e.key==='Enter') send() }} />
-        {roomDetails && roomDetails.id!== 'general' && roomDetails && roomDetails['createdBy']===user?.id && (
-          <button onClick={openManage}>Manage room</button>
-        )}
-        <button onClick={send}>Send</button>
-      </div>
-      {showManage && roomDetails && (
-        <div className="overlay">
-          <div className="card" style={{ width: 520 }}>
-            <h3>Manage room</h3>
-            <label>Name</label>
-            <input value={editName} onChange={(e:any)=>setEditName(e.target.value)} />
-            <label>Description</label>
-            <textarea value={editDescription} onChange={(e:any)=>setEditDescription(e.target.value)} />
-            <label>Icon</label>
-            <input type="file" accept="image/*" onChange={(e:any)=>setEditImageFile(e.target.files?.[0]||null)} />
-            <label>Members</label>
-            <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:8 }}>
-              {selectedMembers.map(m => (
-                <span key={m.id} style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', borderRadius:16, background:'#f0f0f0' }}>
-                  <img src={m.avatarUrl || 'https://api.dicebear.com/7.x/thumbs/svg?seed='+m.username} style={{ width:18, height:18, borderRadius:'50%', marginRight:6 }} />
-                  {m.username}
-                  <button onClick={()=>removeMember(m.id)} style={{ marginLeft:6, border:'none', background:'transparent', cursor:'pointer' }}>×</button>
-                </span>
-              ))}
-            </div>
-            <div style={{ position:'relative' }}>
-              <input
-                placeholder="Search users by name"
-                value={memberQuery}
-                onChange={(e:any)=>{ setMemberQuery(e.target.value); setShowResults(true) }}
-                onFocus={()=> setShowResults(true)}
-              />
-              {showResults && memberResults.length>0 && (
-                <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:'1px solid #ddd', borderRadius:6, zIndex:10, maxHeight:200, overflowY:'auto' }}>
-                  {memberResults.map(u => (
-                    <div key={u.id} onClick={()=>addMember(u)} style={{ display:'flex', alignItems:'center', padding:8, cursor:'pointer' }}>
-                      <img src={u.avatarUrl || 'https://api.dicebear.com/7.x/thumbs/svg?seed='+u.username} style={{ width:24, height:24, borderRadius:'50%', marginRight:8 }} />
-                      <span>{u.username}</span>
-                    </div>
-                  ))}
-                </div>
+            <div key={r.id} className={`server-item ${r.id===active?'active':''}`} onClick={()=>setActive(r.id)}>
+              {r.imageUrl ? (
+                <img src={r.imageUrl} alt={r.name} className="server-icon" />
+              ) : (
+                <div className="server-icon-text">{r.name.charAt(0).toUpperCase()}</div>
               )}
             </div>
-            <div className="row" style={{ justifyContent:'space-between', alignItems:'center' }}>
+          ))}
+          <div className="server-item add-server" onClick={()=>setShowCreate(true)}>
+            <div className="server-icon-text">+</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Channel Sidebar */}
+      <div className="channel-sidebar">
+        <div className="channel-header">
+          <h3>{roomDetails?.name || 'Select a room'}</h3>
+          {roomDetails && roomDetails.id !== 'general' && (
+            <button className="manage-btn" onClick={openManage} title="Edit group">
+              ⚙️
+            </button>
+          )}
+        </div>
+        
+        {roomDetails?.description && (
+          <div className="channel-description">{roomDetails.description}</div>
+        )}
+        
+        <div className="members-section">
+          <h4>Members ({roomDetails?.memberIds?.length || 0})</h4>
+          <div className="members-list">
+            {roomDetails?.members?.map((member: any) => (
+              <div key={member.id} className="member-item">
+                <img src={member.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${member.username}`} alt={member.username} />
+                <span>{member.username}</span>
+                {member.id === user?.id && <span className="you-badge">You</span>}
+              </div>
+            )) || []}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="main-chat">
+        <div className="chat-header">
+          <h2>#{roomDetails?.name || 'general'}</h2>
+          <div className="chat-info">
+            {roomDetails?.description && <span className="chat-description">{roomDetails.description}</span>}
+          </div>
+        </div>
+        
+        <div className="messages-container">
+          {msgs.map(m=> (
+            <div key={m.id} className={`message ${m.senderId===user?.id?'own-message':''}`}>
+              <img src={m.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${m.senderName||'friend'}`} className="message-avatar" />
+              <div className="message-content">
+                <div className="message-header">
+                  <span className="username">{m.senderName||m.senderId.slice(0,6)}</span>
+                  <span className="timestamp">{new Date(m.timestamp).toLocaleTimeString()}</span>
+                </div>
+                <div className="message-text">{m.text}</div>
+              </div>
+            </div>
+          ))}
+          <div ref={endRef} />
+        </div>
+        
+        <div className="message-input-container">
+          <div className="message-input">
+            <input 
+              value={text} 
+              onChange={(e:any)=>setText(e.target.value)} 
+              placeholder={`Message #${roomDetails?.name || 'general'}`} 
+              onKeyDown={e=>{ if(e.key==='Enter') send() }} 
+            />
+            <button className="send-button" onClick={send} disabled={!text.trim()}>Send</button>
+          </div>
+        </div>
+      </div>
+      {showManage && roomDetails && (
+        <div className="discord-modal-overlay">
+          <div className="discord-modal">
+            <div className="discord-modal-header">
+              <h2>Server Settings</h2>
+              <button className="close-btn" onClick={()=>{ setShowManage(false); setEditImageFile(null) }}>×</button>
+            </div>
+            
+            <div className="discord-modal-content">
+              <div className="setting-section">
+                <h3>Server Overview</h3>
+                <div className="form-group">
+                  <label>Server Name</label>
+                  <input 
+                    value={editName} 
+                    onChange={(e:any)=>setEditName(e.target.value)}
+                    className="discord-input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Server Description</label>
+                  <textarea 
+                    value={editDescription} 
+                    onChange={(e:any)=>setEditDescription(e.target.value)}
+                    className="discord-textarea"
+                    placeholder="What's this server about?"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Server Icon</label>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={(e:any)=>setEditImageFile(e.target.files?.[0]||null)}
+                    className="discord-file-input"
+                  />
+                </div>
+              </div>
+              
+              <div className="setting-section">
+                <h3>Members</h3>
+                <div className="members-management">
+                  <div className="selected-members">
+                    {selectedMembers.map(m => (
+                      <div key={m.id} className="member-tag">
+                        <img src={m.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${m.username}`} alt={m.username} />
+                        <span>{m.username}</span>
+                        <button onClick={()=>removeMember(m.id)} className="remove-member-btn">×</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="member-search">
+                    <input
+                      placeholder="Search users to add..."
+                      value={memberQuery}
+                      onChange={(e:any)=>{ setMemberQuery(e.target.value); setShowResults(true) }}
+                      onFocus={()=> setShowResults(true)}
+                      className="discord-input"
+                    />
+                    {showResults && memberResults.length>0 && (
+                      <div className="member-results">
+                        {memberResults.map(u => (
+                          <div key={u.id} onClick={()=>addMember(u)} className="member-result-item">
+                            <img src={u.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${u.username}`} alt={u.username} />
+                            <span>{u.username}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="discord-modal-footer">
               {roomDetails && (roomDetails as any)['createdBy']===user?.id && (
-                <button className="danger" onClick={async()=>{
-                  if (!confirm('Delete this room?')) return;
+                <button className="discord-btn-danger" onClick={async()=>{
+                  if (!confirm('Are you sure you want to delete this server? This action cannot be undone.')) return;
                   await fetch(`/api/rooms/${roomDetails.id}`, { method:'DELETE', credentials:'include' })
                   setShowManage(false)
                   setRoomDetails(null)
                   await loadRooms()
                   setActive('general')
-                }}>Delete room</button>
+                }}>Delete Server</button>
               )}
-              <div style={{ display:'flex', gap:8 }}>
-              <button onClick={()=>{ setShowManage(false); setEditImageFile(null) }}>Cancel</button>
-              <button onClick={saveManage}>Save</button>
+              <div className="modal-actions">
+                <button className="discord-btn-secondary" onClick={()=>{ setShowManage(false); setEditImageFile(null) }}>Cancel</button>
+                {roomDetails && (roomDetails as any)['createdBy']===user?.id ? (
+                  <button className="discord-btn-primary" onClick={saveManage}>Save Changes</button>
+                ) : (
+                  <div className="muted" style={{fontSize: '12px', color: 'var(--muted)'}}>
+                    Only the group creator can make changes
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
       {showCreate && (
-        <div className="overlay">
-          <div className="card" style={{ width: 420 }}>
-            <h3>Create a new room</h3>
-            <input placeholder="Room name" value={newRoomName} onChange={(e:any)=>setNewRoomName(e.target.value)} />
-            <textarea placeholder="Description (optional)" value={newRoomDescription} onChange={(e:any)=>setNewRoomDescription(e.target.value)} />
-            <input type="file" accept="image/*" onChange={(e:any)=>setNewRoomImageFile(e.target.files?.[0]||null)} />
-            <label>Members</label>
-            <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:8 }}>
-              {selectedNewMembers.map(m => (
-                <span key={m.id} style={{ display:'inline-flex', alignItems:'center', padding:'4px 8px', borderRadius:16, background:'#f0f0f0' }}>
-                  <img src={m.avatarUrl || 'https://api.dicebear.com/7.x/thumbs/svg?seed='+m.username} style={{ width:18, height:18, borderRadius:'50%', marginRight:6 }} />
-                  {m.username}
-                  <button onClick={()=>removeNewMember(m.id)} style={{ marginLeft:6, border:'none', background:'transparent', cursor:'pointer' }}>×</button>
-                </span>
-              ))}
+        <div className="discord-modal-overlay">
+          <div className="discord-modal">
+            <div className="discord-modal-header">
+              <h2>Create Server</h2>
+              <button className="close-btn" onClick={()=>{ setShowCreate(false); setNewRoomName(''); setNewRoomImageFile(null) }}>×</button>
             </div>
-            <div style={{ position:'relative' }}>
-              <input
-                placeholder="Search users by name"
-                value={newMemberQuery}
-                onChange={(e:any)=>{ setNewMemberQuery(e.target.value); setShowNewResults(true) }}
-                onFocus={()=> setShowNewResults(true)}
-              />
-              {showNewResults && newMemberResults.length>0 && (
-                <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:'1px solid #ddd', borderRadius:6, zIndex:10, maxHeight:200, overflowY:'auto' }}>
-                  {newMemberResults.map(u => (
-                    <div key={u.id} onClick={()=>addNewMember(u)} style={{ display:'flex', alignItems:'center', padding:8, cursor:'pointer' }}>
-                      <img src={u.avatarUrl || 'https://api.dicebear.com/7.x/thumbs/svg?seed='+u.username} style={{ width:24, height:24, borderRadius:'50%', marginRight:8 }} />
-                      <span>{u.username}</span>
-                    </div>
-                  ))}
+            
+            <div className="discord-modal-content">
+              <div className="setting-section">
+                <h3>Server Details</h3>
+                <div className="form-group">
+                  <label>Server Name</label>
+                  <input 
+                    placeholder="Enter a server name" 
+                    value={newRoomName} 
+                    onChange={(e:any)=>setNewRoomName(e.target.value)}
+                    className="discord-input"
+                  />
                 </div>
-              )}
+                <div className="form-group">
+                  <label>Server Description</label>
+                  <textarea 
+                    placeholder="What's this server about?" 
+                    value={newRoomDescription} 
+                    onChange={(e:any)=>setNewRoomDescription(e.target.value)}
+                    className="discord-textarea"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Server Icon</label>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={(e:any)=>setNewRoomImageFile(e.target.files?.[0]||null)}
+                    className="discord-file-input"
+                  />
+                </div>
+              </div>
+              
+              <div className="setting-section">
+                <h3>Invite Members</h3>
+                <div className="members-management">
+                  <div className="selected-members">
+                    {selectedNewMembers.map(m => (
+                      <div key={m.id} className="member-tag">
+                        <img src={m.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${m.username}`} alt={m.username} />
+                        <span>{m.username}</span>
+                        <button onClick={()=>removeNewMember(m.id)} className="remove-member-btn">×</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="member-search">
+                    <input
+                      placeholder="Search users to invite..."
+                      value={newMemberQuery}
+                      onChange={(e:any)=>{ setNewMemberQuery(e.target.value); setShowNewResults(true) }}
+                      onFocus={()=> setShowNewResults(true)}
+                      className="discord-input"
+                    />
+                    {showNewResults && newMemberResults.length>0 && (
+                      <div className="member-results">
+                        {newMemberResults.map(u => (
+                          <div key={u.id} onClick={()=>addNewMember(u)} className="member-result-item">
+                            <img src={u.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${u.username}`} alt={u.username} />
+                            <span>{u.username}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="row" style={{ justifyContent:'flex-end' }}>
-              <button onClick={()=>{ setShowCreate(false); setNewRoomName(''); setNewRoomImageFile(null) }}>Cancel</button>
-              <button onClick={createRoom} disabled={!newRoomName.trim()}>Create</button>
+            
+            <div className="discord-modal-footer">
+              <div className="modal-actions">
+                <button className="discord-btn-secondary" onClick={()=>{ setShowCreate(false); setNewRoomName(''); setNewRoomImageFile(null) }}>Cancel</button>
+                <button className="discord-btn-primary" onClick={createRoom} disabled={!newRoomName.trim()}>Create Server</button>
+              </div>
             </div>
           </div>
         </div>

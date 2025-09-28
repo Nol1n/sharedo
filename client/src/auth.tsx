@@ -38,7 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const tokRes = await fetch('/api/token', { credentials: 'include' })
     if (!tokRes.ok) return
     const { token } = await tokRes.json()
-    const url = import.meta.env.DEV ? 'http://localhost:4000' : undefined
+    const url = import.meta.env.DEV ? 'http://localhost:3000' : undefined
     const s = io(url, { withCredentials: true, auth: { token } })
     setSocket(s)
   }

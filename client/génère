@@ -1,0 +1,6 @@
+
+> sharedo-client@0.1.0 build
+> vite build # = ./dist
+
+vite v5.4.20 building for production...
+✓ 0 modules transformed.
