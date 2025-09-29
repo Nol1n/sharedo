@@ -6,10 +6,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:3000',
+      '/api': 'http://localhost:4000',
       // Ensure uploaded images are accessible in dev
       '/uploads': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:4000',
         changeOrigin: true
       }
     }

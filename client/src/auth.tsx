@@ -7,7 +7,7 @@ type AuthContextType = {
   user: User | null
   socket: Socket | null
   refreshProfile: () => Promise<void>
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string, code: string) => Promise<void>
   register: (username: string, email: string, password: string) => Promise<void>
   logout: () => Promise<void>
 }
@@ -38,7 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const tokRes = await fetch('/api/token', { credentials: 'include' })
     if (!tokRes.ok) return
     const { token } = await tokRes.json()
-    const url = import.meta.env.DEV ? 'http://localhost:3000' : undefined
+  const url = import.meta.env.DEV ? 'http://localhost:4000' : undefined
     const s = io(url, { withCredentials: true, auth: { token } })
     setSocket(s)
   }
@@ -47,9 +47,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (socket) { socket.disconnect(); setSocket(null) }
   }
 
-  async function login(username: string, password: string) {
+  async function login(username: string, password: string, code: string) {
     disconnectSocket() // Disconnect old socket before login
-    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ username, password }) })
+    const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ username, password, code }) })
     if (!res.ok) throw new Error('Login failed')
     await refreshProfile()
   }
@@ -68,6 +68,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { refreshProfile() }, [])
 
   useEffect(() => { connectSocket() }, [user])
+
+  // Live updates for profile changes (avatar/username)
+  useEffect(() => {
+    if (!socket) return
+    const onUserUpdated = (u: { id: string; username: string; avatarUrl: string }) => {
+      setUser(prev => prev && prev.id === u.id ? { ...prev, username: u.username, avatarUrl: u.avatarUrl } : prev)
+    }
+    socket.on('user:updated', onUserUpdated)
+    return () => { socket.off('user:updated', onUserUpdated) }
+  }, [socket])
 
   return (
     <AuthContext.Provider value={{ user, socket, refreshProfile, login, register, logout }}>

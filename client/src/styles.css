@@ -1628,3 +1628,24 @@ button.danger:hover {
 }
 
 .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.25); display:grid; place-items: center }
+
+/* Chat day separators (Discord-like) */
+.day-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.day-separator .line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.day-separator .label {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--card);
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}

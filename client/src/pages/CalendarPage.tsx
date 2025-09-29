@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../auth'
 import FullCalendar from '@fullcalendar/react'
 import dayGridPlugin from '@fullcalendar/daygrid'
@@ -12,6 +12,8 @@ export default function CalendarPage(){
   const [selectedEvent, setSelectedEvent] = useState<DetailedEvent|null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [rsvpLoading, setRsvpLoading] = useState<string|null>(null)
+  const [specialDays, setSpecialDays] = useState<Record<string, string>>({})
+  const [specialVersion, setSpecialVersion] = useState(0)
 
   async function load(){
     setIsLoading(true)
@@ -20,6 +22,21 @@ export default function CalendarPage(){
     setIsLoading(false)
   }
   useEffect(()=>{ load() }, [])
+
+  // load special days
+  async function loadSpecialDays(){
+    try {
+  const res = await fetch('/api/special-days', { credentials: 'include' })
+      if (res.ok) {
+        const rows = await res.json()
+        const map: Record<string,string> = {}
+        for (const r of rows) map[r.date] = r.color
+        setSpecialDays(map)
+        setSpecialVersion(v => v + 1)
+      }
+    } catch {}
+  }
+  useEffect(()=>{ loadSpecialDays() }, [])
 
   // Realtime refresh via socket
   useEffect(()=>{
@@ -41,14 +58,66 @@ export default function CalendarPage(){
     socket.on('event:updated', refresh)
     socket.on('event:deleted', refresh)
     socket.on('event:availability', refresh)
+    const onSpecial = (p: { date: string; color: string|null }) => {
+      setSpecialDays(prev => {
+        const next = { ...prev }
+        if (p.color) next[p.date] = p.color; else delete next[p.date]
+        return next
+      })
+      setSpecialVersion(v => v + 1)
+    }
+    socket.on('special:changed', onSpecial)
     
     return ()=>{
       socket.off('event:created', refresh)
       socket.off('event:updated', refresh)
       socket.off('event:deleted', refresh)
       socket.off('event:availability', refresh)
+      socket.off('special:changed', onSpecial)
     }
   }, [socket, selectedEvent])
+
+  // Live update avatars/usernames in drawer when a user updates profile
+  useEffect(() => {
+    if (!socket) return
+    const onUserUpdated = (u: { id: string; username: string; avatarUrl?: string }) => {
+      setSelectedEvent(prev => {
+        if (!prev || !prev.availability) return prev
+        const availability = prev.availability.map((a:any)=> a.userId===u.id ? { ...a, username: u.username, avatarUrl: u.avatarUrl } : a)
+        return { ...prev, availability }
+      })
+    }
+    socket.on('user:updated', onUserUpdated)
+    return () => { socket.off('user:updated', onUserUpdated) }
+  }, [socket])
+
+  const palette = useMemo(() => [
+    '#FFE6E6', // light rose
+    '#E6F7FF', // light blue
+    '#EAFBE7', // light green
+    '#FFF7E6', // light orange
+    '#F3E8FF', // light purple
+    '#FDF2F8'  // light pink
+  ], [])
+
+  function dateStrFromDate(d: Date){
+    // toISOString is UTC; use local date parts to avoid off-by-one
+    const y = d.getFullYear()
+    const m = (d.getMonth()+1).toString().padStart(2,'0')
+    const day = d.getDate().toString().padStart(2,'0')
+    return `${y}-${m}-${day}`
+  }
+
+  async function toggleDayColor(dateStr: string){
+    const has = !!specialDays[dateStr]
+    if (has) {
+      await fetch(`/api/special-days/${dateStr}`, { method: 'DELETE', credentials: 'include' })
+    } else {
+      const idx = (dateStr.charCodeAt(0) + dateStr.charCodeAt(1) + dateStr.charCodeAt(2)) % palette.length
+      const color = palette[idx]
+      await fetch(`/api/special-days/${dateStr}`, { method: 'PUT', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ color }) })
+    }
+  }
 
   async function openDetails(info:any){
     const id = info.event.id
@@ -151,9 +220,111 @@ export default function CalendarPage(){
           </div>
         ) : (
           <div className="modern-calendar">
-            <FullCalendar
+            {(() => { const FC: any = FullCalendar as any; return (
+            <FC
+              key={`cal-${specialVersion}`}
               plugins={[dayGridPlugin]}
               initialView="dayGridMonth"
+              dayCellDidMount={(args: any) => {
+                const dateStr = dateStrFromDate(args.date)
+                const color = specialDays[dateStr]
+                if (color) {
+                  args.el.style.background = color
+                  args.el.style.borderRadius = '8px'
+                }
+                // Avoid duplicate trigger
+                if (args.el.querySelector('.day-color-trigger')) return
+                if (getComputedStyle(args.el).position === 'static') args.el.style.position = 'relative'
+                // Create trigger button at bottom
+                const trigger = document.createElement('button')
+                trigger.className = 'day-color-trigger'
+                trigger.title = 'Choisir une couleur'
+                trigger.textContent = '🎨'
+                Object.assign(trigger.style, {
+                  position: 'absolute', bottom: '6px', left: '50%', transform: 'translateX(-50%)',
+                  border: '1px solid #d8d5cc', background: '#fff', borderRadius: '12px', padding: '2px 6px',
+                  fontSize: '12px', opacity: '0', cursor: 'pointer', transition: 'opacity 0.15s'
+                } as any)
+
+                // Palette popover
+                const pop = document.createElement('div')
+                pop.className = 'day-color-popover'
+                Object.assign(pop.style, {
+                  position: 'absolute', bottom: '28px', left: '50%', transform: 'translateX(-50%)',
+                  display: 'none', gap: '6px', padding: '6px', background: '#fff', border: '1px solid #d8d5cc',
+                  borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', zIndex: 20
+                } as any)
+
+                const addSwatch = (swatchColor: string|null, label: string) => {
+                  const s = document.createElement('button')
+                  s.title = label
+                  Object.assign(s.style, {
+                    width: '18px', height: '18px', borderRadius: '4px', border: '1px solid #cfcabc',
+                    cursor: 'pointer', padding: '0'
+                  } as any)
+                  if (swatchColor) {
+                    s.style.background = swatchColor
+                  } else {
+                    s.style.background = 'transparent'
+                    s.style.border = '1px dashed #cfcabc'
+                    s.textContent = 'Ø'
+                    s.style.fontSize = '12px'
+                    s.style.lineHeight = '16px'
+                    s.style.color = '#888'
+                  }
+                  s.onclick = async (e) => {
+                    e.stopPropagation()
+                    if (swatchColor) {
+                      // Optimistic update
+                      setSpecialDays(prev => ({ ...prev, [dateStr]: swatchColor }))
+                      setSpecialVersion(v => v + 1)
+                      await fetch(`/api/special-days/${dateStr}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials:'include', body: JSON.stringify({ color: swatchColor }) })
+                    } else {
+                      setSpecialDays(prev => { const n = { ...prev }; delete n[dateStr]; return n })
+                      setSpecialVersion(v => v + 1)
+                      await fetch(`/api/special-days/${dateStr}`, { method: 'DELETE', credentials:'include' })
+                    }
+                    pop.style.display = 'none'
+                  }
+                  pop.appendChild(s)
+                }
+
+                const paletteColors = palette
+                for (const c of paletteColors) addSwatch(c, 'Appliquer la couleur')
+                addSwatch(null, 'Sans couleur')
+
+                let isOpen = false
+                trigger.onclick = (e) => {
+                  e.stopPropagation()
+                  const nextOpen = pop.style.display === 'none'
+                  pop.style.display = nextOpen ? 'flex' : 'none'
+                  isOpen = nextOpen
+                  if (isOpen) trigger.style.opacity = '1'
+                }
+
+                const closeOnOutside = (ev: any) => {
+                  if (!args.el.contains(ev.target)) {
+                    pop.style.display = 'none'
+                    isOpen = false
+                    document.removeEventListener('click', closeOnOutside)
+                  }
+                }
+                trigger.addEventListener('click', ()=>{
+                  document.addEventListener('click', closeOnOutside)
+                })
+
+                // Show trigger only on day-cell hover (unless popover is open)
+                args.el.addEventListener('mouseenter', ()=>{ trigger.style.opacity = '1' })
+                args.el.addEventListener('mouseleave', ()=>{
+                  if (!isOpen) {
+                    trigger.style.opacity = '0'
+                    pop.style.display = 'none'
+                  }
+                })
+
+                args.el.appendChild(trigger)
+                args.el.appendChild(pop)
+              }}
               events={events.map(e=>({ 
                 id: e.id, 
                 title: e.title, 
@@ -181,7 +352,7 @@ export default function CalendarPage(){
                 month: 'Month',
                 week: 'Week'
               }}
-            />
+            />)})()}
           </div>
         )}
       </div>

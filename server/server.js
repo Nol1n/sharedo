@@ -24,6 +24,30 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 const PORT = process.env.PORT || 3000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
+// Generate or load a persisted 6-char server access code
+function randomCode(n=6){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i=0;i<n;i++) s += chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
+let SERVER_CODE = (process.env.SERVER_CODE || '').toUpperCase();
+try {
+  if (!SERVER_CODE) {
+    const codePath = path.join(__dirname, 'server_code.txt');
+    if (fs.existsSync(codePath)) {
+      const raw = fs.readFileSync(codePath, 'utf8').trim().toUpperCase();
+      if (/^[A-Z0-9]{6}$/.test(raw)) SERVER_CODE = raw;
+    }
+    if (!SERVER_CODE) {
+      SERVER_CODE = randomCode(6).toUpperCase();
+      fs.writeFileSync(codePath, SERVER_CODE, 'utf8');
+    }
+  }
+} catch (e) {
+  // Fallback to random if FS fails
+  if (!SERVER_CODE) SERVER_CODE = randomCode(6).toUpperCase();
+}
 
 // SQLite database
 const dbPath = path.join(__dirname, 'sharedo.db');
@@ -120,6 +144,14 @@ db.serialize(() => {
     FOREIGN KEY (userId) REFERENCES users(id),
     UNIQUE(ideaId, userId)
   )`);
+
+  // Special highlighted days for calendar
+  db.run(`CREATE TABLE IF NOT EXISTS special_days (
+    date TEXT PRIMARY KEY,
+    color TEXT NOT NULL,
+    createdBy TEXT NOT NULL,
+    FOREIGN KEY (createdBy) REFERENCES users(id)
+  )`);
   
   // Create default General room if it doesn't exist
   db.get('SELECT id FROM rooms WHERE id = ?', ['general'], (err, row) => {
@@ -197,8 +229,10 @@ app.post('/api/register', async (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
-  const { username, password } = req.body || {};
-  
+  const { username, password, code } = req.body || {};
+  if (!code || String(code).toUpperCase() !== SERVER_CODE) {
+    return res.status(403).json({ error: 'Invalid code' });
+  }
   db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
     if (err) return res.status(500).json({ error: 'Database error' });
     if (!user) return res.status(400).json({ error: 'Invalid credentials' });
@@ -249,6 +283,8 @@ app.put('/api/profile', authRequired, (req, res) => {
     
     db.get('SELECT * FROM users WHERE id = ?', [req.user.id], (err, user) => {
       if (err) return res.status(500).json({ error: 'Database error' });
+      const payload = { id: user.id, username: user.username, avatarUrl: user.avatarUrl };
+      io.emit('user:updated', payload);
       res.json({ id: user.id, username: user.username, email: user.email, avatarUrl: user.avatarUrl });
     });
   });
@@ -329,6 +365,35 @@ app.post('/api/upload', authRequired, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file' });
   const url = `/uploads/${req.file.filename}`;
   res.status(201).json({ url });
+});
+
+// Special days API
+app.get('/api/special-days', authRequired, async (req, res) => {
+  try {
+    const rows = await dbAll('SELECT * FROM special_days');
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: 'Database error' }); }
+});
+
+app.put('/api/special-days/:date', authRequired, async (req, res) => {
+  try {
+    const { date } = req.params; // YYYY-MM-DD
+    const { color } = req.body || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date' });
+    if (typeof color !== 'string' || !color) return res.status(400).json({ error: 'Invalid color' });
+    await dbRun('INSERT INTO special_days (date, color, createdBy) VALUES (?, ?, ?) ON CONFLICT(date) DO UPDATE SET color = excluded.color', [date, color, req.user.id]);
+    io.emit('special:changed', { date, color });
+    res.json({ date, color });
+  } catch (e) { res.status(500).json({ error: 'Database error' }); }
+});
+
+app.delete('/api/special-days/:date', authRequired, async (req, res) => {
+  try {
+    const { date } = req.params;
+    await dbRun('DELETE FROM special_days WHERE date = ?', [date]);
+    io.emit('special:changed', { date, color: null });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'Database error' }); }
 });
 
 app.delete('/api/ideas/:id', authRequired, async (req, res) => {
@@ -686,4 +751,5 @@ app.get('*', (req, res, next) => {
 
 server.listen(PORT, () => {
   console.log(`Sharedo server listening on http://localhost:${PORT}`);
+  console.log(`Server access code: ${SERVER_CODE}`);
 });

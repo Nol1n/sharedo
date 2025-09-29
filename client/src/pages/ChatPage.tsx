@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../auth'
 
 type Msg = { id: string; roomId?: string; senderId: string; senderName?: string; avatarUrl?: string; text: string; timestamp: number }
@@ -58,6 +58,21 @@ export default function ChatPage(){
     } 
   }, [active])
 
+  // Live update avatars/usernames when a user updates their profile
+  useEffect(()=>{
+    if (!socket) return
+    const onUserUpdated = (u: { id: string; username: string; avatarUrl?: string }) => {
+      setRoomDetails(prev => {
+        if (!prev || !(prev as any).members) return prev as any
+        const members = (prev as any).members.map((m:any)=> m.id===u.id ? { ...m, username: u.username, avatarUrl: u.avatarUrl } : m)
+        return { ...prev, members } as any
+      })
+      setMsgs(prev => prev.map(m => m.senderId===u.id ? { ...m, senderName: u.username, avatarUrl: u.avatarUrl } : m))
+    }
+    socket.on('user:updated', onUserUpdated)
+    return ()=> { socket.off('user:updated', onUserUpdated) }
+  }, [socket])
+
   useEffect(()=>{
     if (!socket) return
     const handler = (m:Msg)=> {
@@ -101,6 +116,42 @@ export default function ChatPage(){
     socket.emit('chat:newMessage', { text, roomId: active })
     setText('')
   }
+
+  // Helpers for day separators (Discord-like)
+  function isSameDay(a: Date, b: Date){
+    return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate()
+  }
+  function dayKeyFromTs(ts: number){
+    const d = new Date(ts)
+    const y = d.getFullYear(); const m = (d.getMonth()+1).toString().padStart(2,'0'); const day = d.getDate().toString().padStart(2,'0')
+    return `${y}-${m}-${day}`
+  }
+  function dayLabel(ts: number){
+    const d = new Date(ts)
+    const now = new Date()
+    const yesterday = new Date(now)
+    yesterday.setDate(now.getDate()-1)
+    if (isSameDay(d, now)) return "Aujourd'hui"
+    if (isSameDay(d, yesterday)) return 'Hier'
+    if (d.getFullYear() === now.getFullYear()) {
+      return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long' }).format(d)
+    }
+    return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }).format(d)
+  }
+
+  const timeline = useMemo(()=>{
+    const items: Array<{ type:'sep'; key:string; label:string } | { type:'msg'; key:string; msg: Msg }> = []
+    let lastKey = ''
+    for (const m of msgs) {
+      const k = dayKeyFromTs(m.timestamp)
+      if (k !== lastKey) {
+        items.push({ type:'sep', key:'sep-'+k, label: dayLabel(m.timestamp) })
+        lastKey = k
+      }
+      items.push({ type:'msg', key:m.id, msg: m })
+    }
+    return items
+  }, [msgs])
 
   async function openManage(){
     if (!roomDetails) return
@@ -286,15 +337,21 @@ export default function ChatPage(){
         </div>
         
         <div className="messages-container">
-          {msgs.map(m=> (
-            <div key={m.id} className={`message ${m.senderId===user?.id?'own-message':''}`}>
-              <img src={m.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${m.senderName||'friend'}`} className="message-avatar" />
+          {timeline.map(item => item.type==='sep' ? (
+            <div key={item.key} className="day-separator">
+              <span className="line" />
+              <span className="label">{item.label}</span>
+              <span className="line" />
+            </div>
+          ) : (
+            <div key={item.key} className={`message ${item.msg.senderId===user?.id?'own-message':''}`}>
+              <img src={item.msg.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${item.msg.senderName||'friend'}`} className="message-avatar" />
               <div className="message-content">
                 <div className="message-header">
-                  <span className="username">{m.senderName||m.senderId.slice(0,6)}</span>
-                  <span className="timestamp">{new Date(m.timestamp).toLocaleTimeString()}</span>
+                  <span className="username">{item.msg.senderName||item.msg.senderId.slice(0,6)}</span>
+                  <span className="timestamp">{new Date(item.msg.timestamp).toLocaleTimeString()}</span>
                 </div>
-                <div className="message-text">{m.text}</div>
+                <div className="message-text">{item.msg.text}</div>
               </div>
             </div>
           ))}

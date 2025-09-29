@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { type ChangeEvent, type FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
 
@@ -7,10 +7,11 @@ export default function Login() {
   const nav = useNavigate()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!username.trim() || !password.trim()) {
       setError('Please fill in all fields')
@@ -21,7 +22,7 @@ export default function Login() {
     setError('')
     
     try {
-      await login(username, password)
+  await login(username, password, code)
       nav('/moodboard')
     } catch (e: any) {
       setError(e.message || 'Login failed')
@@ -66,7 +67,7 @@ export default function Login() {
                 type="text"
                 placeholder="Enter your username"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)}
                 className="auth-input"
                 disabled={isLoading}
               />
@@ -82,7 +83,23 @@ export default function Login() {
                 type="password"
                 placeholder="Enter your password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
+                className="auth-input"
+                disabled={isLoading}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="code">Server access code</label>
+            <div className="input-wrapper">
+              <span className="input-icon">🔑</span>
+              <input
+                id="code"
+                type="text"
+                placeholder="6-letter code"
+                value={code}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setCode(e.target.value.toUpperCase())}
                 className="auth-input"
                 disabled={isLoading}
               />
