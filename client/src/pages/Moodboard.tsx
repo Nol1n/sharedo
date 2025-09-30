@@ -1,26 +1,43 @@
 import React, { useEffect, useState } from 'react'
 import { useAuth } from '../auth'
+import { useNotifications } from '../notifications'
 
 type Idea = { id: string; title: string; description?: string; imageUrl?: string; createdBy: string; createdAt: number, votes?: { up: number; down: number }, myVote?: 'up' | 'down' | null }
 
 export default function Moodboard() {
   const { user } = useAuth()
+  const { push } = useNotifications()
   const [ideas, setIdeas] = useState<Idea[]>([])
   const [title, setTitle] = useState('')
   // Removed image URL text input; we only support file uploads now
   const [description, setDescription] = useState('')
   const [file, setFile] = useState<File|null>(null)
   const [show, setShow] = useState(false)
+  const [prefilledImageUrl, setPrefilledImageUrl] = useState<string | null>(null)
   // Scheduling modal state
   const [scheduleIdea, setScheduleIdea] = useState<Idea | null>(null)
   const [scheduleDate, setScheduleDate] = useState('') // YYYY-MM-DD
   const [scheduleTime, setScheduleTime] = useState('') // HH:MM
+  const [scheduleLoading, setScheduleLoading] = useState(false)
 
   async function loadIdeas(){
     const res = await fetch('/api/ideas', { credentials: 'include' })
     if (res.ok) setIdeas(await res.json())
   }
   useEffect(()=>{ loadIdeas() }, [])
+
+  // Listen to global drop events to prefill image for new idea
+  useEffect(()=>{
+    const handler = (e: any) => {
+      const d = e.detail || {}
+      if (d.kind === 'idea' && d.url) {
+        setPrefilledImageUrl(d.url)
+        setShow(true)
+      }
+    }
+    window.addEventListener('sharedo:dropped', handler as any)
+    return ()=> window.removeEventListener('sharedo:dropped', handler as any)
+  }, [])
 
   async function addIdea(){
     if (!title.trim()) return
@@ -60,9 +77,9 @@ export default function Moodboard() {
   useEffect(()=>{
     if (!socket) return
     const refresh = ()=> loadIdeas()
-    socket.on('idea:created', refresh)
-    socket.on('idea:deleted', refresh)
-    socket.on('ideas:changed', refresh)
+  socket.on('idea:created', refresh)
+  socket.on('idea:deleted', refresh)
+  socket.on('ideas:changed', refresh)
     return ()=>{
       socket.off('idea:created', refresh)
       socket.off('idea:deleted', refresh)
@@ -92,6 +109,7 @@ export default function Moodboard() {
                 onClick={async()=>{ await fetch(`/api/ideas/${i.id}/vote`, { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ vote: i.myVote==='down' ? null : 'down' }) }); await loadIdeas(); }}
               >👎 {i.votes?.down ?? 0}</button>
             </div>
+            {/* reactions removed for ideas on the moodboard */}
             <div className="actions">
               <button onClick={()=>schedule(i)}>Schedule this</button>
               {user?.id === i.createdBy && (
@@ -107,11 +125,27 @@ export default function Moodboard() {
             <h3>New Idea</h3>
             <input placeholder="Title" value={title} onChange={(e:any)=>setTitle(e.target.value)} />
             <textarea placeholder="Description (optional)" value={description} onChange={(e:any)=>setDescription(e.target.value)} />
-            {/* URL input removed; use file upload below */}
-            <input type="file" accept="image/*" onChange={(e:any)=>setFile(e.target.files?.[0]||null)} />
+                {/* URL input removed; use file upload below. If a prefilling URL exists, show preview */}
+                {prefilledImageUrl ? (
+                  <div style={{marginBottom:8}}>
+                    <img src={prefilledImageUrl} style={{maxWidth:'100%', borderRadius:8}} />
+                    <div className="muted">Image prefilled from drop</div>
+                  </div>
+                ) : (
+                  <input type="file" accept="image/*" onChange={(e:any)=>setFile(e.target.files?.[0]||null)} />
+                )}
             <div className="row" style={{justifyContent:'flex-end'}}>
               <button onClick={()=>setShow(false)}>Cancel</button>
-              <button onClick={async()=>{ await addIdea(); setShow(false) }}>Add</button>
+                  <button onClick={async()=>{ 
+                    // if prefilling exists, upload is already done and addIdea should use the URL
+                    if (prefilledImageUrl) {
+                      const res = await fetch('/api/ideas', { method: 'POST', headers: { 'Content-Type':'application/json' }, credentials: 'include', body: JSON.stringify({ title, description, imageUrl: prefilledImageUrl }) })
+                      if (res.ok) { setTitle(''); setDescription(''); setFile(null); setPrefilledImageUrl(null); await loadIdeas() }
+                      setShow(false)
+                      return
+                    }
+                    await addIdea(); setShow(false)
+                  }}>Add</button>
             </div>
           </div>
         </div>
@@ -136,25 +170,38 @@ export default function Moodboard() {
                 onChange={(e:any)=>setScheduleTime(e.target.value)}
               />
             </div>
-            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <div className="row" style={{ justifyContent: 'flex-end' }}>
               <button onClick={()=>{ setScheduleIdea(null); setScheduleTime(''); }}>Cancel</button>
               <button
                 onClick={async ()=>{
-                  if (!scheduleDate || !scheduleTime) return;
+                  if (!scheduleDate || !scheduleTime || !scheduleIdea) return;
                   const dateTime = `${scheduleDate}T${scheduleTime}`
-                  const res = await fetch('/api/events', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    credentials: 'include',
-                    body: JSON.stringify({ title: scheduleIdea.title, date: dateTime, ideaId: scheduleIdea.id })
-                  })
-                  if (res.ok) {
-                    alert('Event scheduled! Check the calendar.')
-                    setScheduleIdea(null)
-                    setScheduleTime('')
+                  // Close modal immediately
+                  setScheduleIdea(null)
+                  setScheduleTime('')
+                  setScheduleLoading(true)
+                  try {
+                    const res = await fetch('/api/events', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ title: scheduleIdea.title, date: dateTime, ideaId: scheduleIdea.id })
+                    })
+                    if (res.ok) {
+                      push({ id: String(Date.now()), type: 'success', title: 'Event scheduled', body: 'Check your calendar' })
+                      // Optionally reload ideas/events if needed
+                      await loadIdeas()
+                    } else {
+                      const d = await res.json().catch(()=>null)
+                      push({ id: String(Date.now()), type: 'error', title: 'Schedule failed', body: d?.error || res.statusText })
+                    }
+                  } catch (err:any) {
+                    push({ id: String(Date.now()), type: 'error', title: 'Schedule failed', body: err?.message || 'Network error' })
+                  } finally {
+                    setScheduleLoading(false)
                   }
                 }}
-                disabled={!scheduleDate || !scheduleTime}
+                disabled={!scheduleDate || !scheduleTime || scheduleLoading}
               >Create</button>
             </div>
           </div>

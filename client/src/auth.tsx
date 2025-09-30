@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { io, Socket } from 'socket.io-client'
 
-export type User = { id: string; username: string; email: string; avatarUrl: string }
+export type User = { id: string; username: string; email: string; avatarUrl: string; googleLinked?: boolean }
 
 type AuthContextType = {
   user: User | null

@@ -7,6 +7,20 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Report client-side runtime errors to the server for debugging
+      window.addEventListener('error', function (e) {
+        try {
+          navigator.sendBeacon('/api/client-error', JSON.stringify({ message: e.message, filename: e.filename, lineno: e.lineno, colno: e.colno, stack: e.error && e.error.stack }))
+        } catch (err) { /* best-effort */ }
+      })
+      window.addEventListener('unhandledrejection', function (ev) {
+        try {
+          const r = ev && ev.reason ? (ev.reason.stack || ev.reason.message || String(ev.reason)) : String(ev)
+          navigator.sendBeacon('/api/client-error', JSON.stringify({ type: 'unhandledrejection', reason: r }))
+        } catch (err) {}
+      })
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
   </html>

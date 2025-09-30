@@ -1,13 +1,15 @@
 import { Route, Routes, Navigate, Link, useNavigate } from 'react-router-dom'
 import Moodboard from './pages/Moodboard'
 import CalendarPage from './pages/CalendarPage'
+import MapPage from './pages/MapPage'
 import ChatPage from './pages/ChatPage'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Profile from './pages/Profile'
 import { AuthProvider, useAuth } from './auth'
+import { useNotifications } from './notifications'
 
-function Protected({ children }: { children: JSX.Element }) {
+function Protected({ children }: { children: any }) {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
   return children
@@ -16,14 +18,21 @@ function Protected({ children }: { children: JSX.Element }) {
 function Layout() {
   const { user, logout } = useAuth()
   const nav = useNavigate()
+  const { clear, count } = useNotifications()
   return (
     <div className="app">
       <aside className="sidebar">
-        <h1 className="logo">Sharedo</h1>
+          <div className="logo-wrap">
+            <div className="logo-ascii">Sharedo</div>
+          </div>
+          <div className="logo-divider" aria-hidden></div>
         <nav>
           <Link to="/moodboard">Moodboard</Link>
           <Link to="/calendar">Calendar</Link>
-          <Link to="/chat">Chat</Link>
+          <Link to="/map">Map</Link>
+            <Link to="/chat" className="sidebar-link" onClick={() => { clear(); }}>
+              Chat {count > 0 && <span className="nav-badge">{count}</span>}
+            </Link>
           <Link to="/profile">Profile</Link>
         </nav>
         {user && (
@@ -40,6 +49,7 @@ function Layout() {
           <Route path="/calendar" element={<Protected><CalendarPage/></Protected>} />
           <Route path="/chat" element={<Protected><ChatPage/></Protected>} />
           <Route path="/profile" element={<Protected><Profile/></Protected>} />
+          <Route path="/map" element={<Protected><MapPage/></Protected>} />
           <Route path="/" element={<Navigate to="/moodboard" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

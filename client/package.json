@@ -16,6 +16,8 @@
     "fullcalendar": "^6.1.15",
     "@fullcalendar/react": "^6.1.15",
     "@fullcalendar/daygrid": "^6.1.15"
+    ,"leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

@@ -21,6 +21,7 @@ export default function ChatPage(){
   const [selectedNewMembers, setSelectedNewMembers] = useState<Array<{id:string; username:string; avatarUrl?:string}>>([])
   const [showNewResults, setShowNewResults] = useState(false)
   const [roomDetails, setRoomDetails] = useState<RoomDetails|null>(null)
+  const [openReactionFor, setOpenReactionFor] = useState<string|null>(null)
   const [showManage, setShowManage] = useState(false)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
@@ -73,6 +74,21 @@ export default function ChatPage(){
     return ()=> { socket.off('user:updated', onUserUpdated) }
   }, [socket])
 
+    // Listen for dropped images intended for room icon assignment
+    useEffect(()=>{
+      const handler = async (e: any) => {
+        const d = e.detail || {}
+        if (d.kind !== 'room') return
+        if (!showManage || !roomDetails) return
+        // Apply directly to room image via API
+        try {
+          await fetch(`/api/rooms/${roomDetails.id}`, { method: 'PUT', headers: { 'Content-Type':'application/json' }, credentials: 'include', body: JSON.stringify({ imageUrl: d.url }) })
+          await loadRooms(); await loadRoomDetails(roomDetails.id)
+        } catch (err) { console.error('Failed to set room icon', err) }
+      }
+      window.addEventListener('sharedo:dropped', handler as any)
+      return ()=> window.removeEventListener('sharedo:dropped', handler as any)
+    }, [showManage, roomDetails])
   useEffect(()=>{
     if (!socket) return
     const handler = (m:Msg)=> {
@@ -82,6 +98,19 @@ export default function ChatPage(){
       // Refresh rooms list and details if current room updated
       loadRooms()
       if (roomDetails && data.id === roomDetails.id) loadRoomDetails(roomDetails.id)
+    }
+    const onReactionChanged = (d:any) => {
+      if (d.targetType === 'message' && d.targetId) loadMessages(active)
+    }
+    const onPresence = (p:any) => {
+      // reload rooms to update member counts
+      loadRooms()
+      // also update current room member online flags if present
+      setRoomDetails(prev => {
+        if (!prev || !prev.members) return prev
+        const members = (prev.members as any[]).map(m => m.id === p.userId ? { ...m, online: p.online } : m)
+        return { ...prev, members } as any
+      })
     }
     const onRoomDeleted = (data:any)=>{
       if (roomDetails && data.id === roomDetails.id) {
@@ -96,17 +125,21 @@ export default function ChatPage(){
     const onConnect = ()=>{ socket.emit('chat:join', { roomId: active }) }
     socket.on('chat:message', handler)
     socket.on('room:updated', onRoomUpdated)
+  socket.on('reaction:changed', onReactionChanged)
     socket.on('room:deleted', onRoomDeleted)
     socket.on('connect', onConnect)
     socket.on('rooms:changed', loadRooms)
+  socket.on('presence:changed', onPresence)
     // join room
     socket.emit('chat:join', { roomId: active })
     return ()=>{
       socket.off('chat:message', handler)
       socket.off('room:updated', onRoomUpdated)
+      socket.off('reaction:changed', onReactionChanged)
       socket.off('room:deleted', onRoomDeleted)
       socket.off('connect', onConnect)
       socket.off('rooms:changed', loadRooms)
+      socket.off('presence:changed', onPresence)
       socket.emit('chat:leave', { roomId: active })
     }
   }, [socket, active, roomDetails])
@@ -314,11 +347,12 @@ export default function ChatPage(){
         )}
         
         <div className="members-section">
-          <h4>Members ({roomDetails?.memberIds?.length || 0})</h4>
+          <h4>Members ({roomDetails?.members?.length || 0})</h4>
           <div className="members-list">
             {roomDetails?.members?.map((member: any) => (
               <div key={member.id} className="member-item">
                 <img src={member.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${member.username}`} alt={member.username} />
+                <span className={"presence-dot " + (member.online ? 'presence-online' : 'presence-offline')} title={member.online ? 'Online' : 'Offline'} />
                 <span>{member.username}</span>
                 {member.id === user?.id && <span className="you-badge">You</span>}
               </div>
@@ -352,6 +386,33 @@ export default function ChatPage(){
                   <span className="timestamp">{new Date(item.msg.timestamp).toLocaleTimeString()}</span>
                 </div>
                 <div className="message-text">{item.msg.text}</div>
+                {/* Visible reaction bar showing existing reactions */}
+                <div className="reaction-bar">
+                  {(item.msg.reactions || []).map((r:any) => (
+                    <button key={r.emoji} className={`reaction-pill ${r.reactedByMe ? 'active' : ''}`} onClick={async ()=>{
+                      // toggle reaction
+                      if (r.reactedByMe) {
+                        await fetch('/api/reactions', { method: 'DELETE', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify({ targetType: 'message', targetId: item.msg.id, emoji: r.emoji }) })
+                      } else {
+                        await fetch('/api/reactions', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify({ targetType: 'message', targetId: item.msg.id, emoji: r.emoji }) })
+                      }
+                      await loadMessages(active)
+                    }}>{r.emoji} {r.count}</button>
+                  ))}
+                </div>
+
+                <div className="message-reactions" style={{position:'relative'}}>
+                  <div className="reaction-trigger" onClick={(e)=>{ e.stopPropagation(); setOpenReactionFor(openReactionFor===item.msg.id?null:item.msg.id) }} title="Add reaction">🙂</div>
+                  {openReactionFor === item.msg.id && (
+                    <div className="reaction-overlay" onClick={e=>e.stopPropagation()} style={{display:'flex', gap:8}}>
+                      {/* small emoji picker for adding new reactions */}
+                      {['👍','❤️','😂','😮','🎉'].map(e=> (
+                        <button key={e} className="reaction-pill" onClick={async ()=>{ await fetch('/api/reactions', { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify({ targetType: 'message', targetId: item.msg.id, emoji: e }) }); await loadMessages(active); setOpenReactionFor(null) }}>{e}</button>
+                      ))}
+                      <button className="reaction-close" onClick={()=>setOpenReactionFor(null)}>×</button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ))}
