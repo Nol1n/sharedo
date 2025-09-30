@@ -1,17 +1,53 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useNotifications } from '../notifications'
 import { useAuth } from '../auth'
 
-type Msg = { id: string; roomId?: string; senderId: string; senderName?: string; avatarUrl?: string; text: string; timestamp: number }
+type Msg = { id: string; roomId?: string; senderId: string; senderName?: string; avatarUrl?: string; text: string; timestamp: number; replyTo?: string }
 type Room = { id: string; name: string; memberIds: string[] }
 type RoomDetails = Room & { imageUrl?: string; description?: string }
 
 export default function ChatPage(){
   const { socket, user } = useAuth()
+  const { clearMessages } = useNotifications()
   const [rooms, setRooms] = useState<RoomDetails[]>([])
   const [active, setActive] = useState<string>('general')
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [text, setText] = useState('')
+  const [pendingAttachments, setPendingAttachments] = useState<Array<{url:string; name?:string; type?:string}>>([])
+  const [replyTarget, setReplyTarget] = useState<Msg|null>(null)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [mentionResults, setMentionResults] = useState<Array<{id:string; username:string; avatarUrl?:string}>>([])
+  const [showMentionResults, setShowMentionResults] = useState(false)
+  const [hashQuery, setHashQuery] = useState('')
+  const [hashResults, setHashResults] = useState<Array<any>>([])
+  const [showHashResults, setShowHashResults] = useState(false)
+  const hashTimer = useRef<number|undefined>(undefined)
+  const inputRef = useRef<HTMLInputElement|null>(null)
+
+  function selectMention(u: { id: string; username: string }){
+    // replace the trailing @token with the selected username + space
+    const v = text
+    const newVal = v.replace(/(?:^|\s)@([a-zA-Z0-9_\-]{1,})$/, (m, p1)=> {
+      const prefix = m.startsWith('@') ? '' : m.slice(0, m.indexOf('@'))
+      return (prefix ? prefix + ' ' : '') + '@' + u.username + ' '
+    })
+    setText(newVal)
+    setShowMentionResults(false)
+    setMentionQuery('')
+    // focus input again
+    setTimeout(()=> inputRef.current?.focus(), 0)
+  }
   const endRef = useRef<HTMLDivElement|null>(null)
+  const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  function scrollToMessage(id: string){
+    const el = messageRefs.current.get(id)
+    if (!el) return
+    // scroll smoothly and add a brief highlight
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('flash-highlight')
+    setTimeout(()=> el.classList.remove('flash-highlight'), 1200)
+  }
   const [showCreate, setShowCreate] = useState(false)
   const [newRoomName, setNewRoomName] = useState('')
   const [newRoomImageFile, setNewRoomImageFile] = useState<File|null>(null)
@@ -51,9 +87,17 @@ export default function ChatPage(){
   }
 
   useEffect(()=>{ loadRooms() }, [])
+  useEffect(()=>{
+    // expose current room globally so notifications can ignore messages for the open room
+    (window as any).sharedoChatActiveRoom = active
+    return ()=> { (window as any).sharedoChatActiveRoom = null }
+  }, [active])
   useEffect(()=>{ 
     if(active) { 
-      setMsgs([]) // clear previous room messages immediately
+      // clear previous room messages immediately
+      setMsgs([])
+      // reset chat badge when user opens a room
+      try { clearMessages() } catch(e){}
       loadMessages(active); 
       loadRoomDetails(active) 
     } 
@@ -92,7 +136,11 @@ export default function ChatPage(){
   useEffect(()=>{
     if (!socket) return
     const handler = (m:Msg)=> {
-      if (m.roomId === active) setMsgs(prev=>[...prev, m])
+      if (m.roomId === active) {
+        setMsgs(prev=>[...prev, m])
+        // ensure badge cleared when receiving message for currently open room
+        try { clearMessages() } catch(e){}
+      }
     }
     const onRoomUpdated = (data:any)=>{
       // Refresh rooms list and details if current room updated
@@ -145,9 +193,12 @@ export default function ChatPage(){
   }, [socket, active, roomDetails])
 
   function send(){
-    if (!text.trim() || !socket) return
-    socket.emit('chat:newMessage', { text, roomId: active })
+    if ((!text || !text.trim()) && pendingAttachments.length === 0) return
+    if (!socket) return
+    socket.emit('chat:newMessage', { text, roomId: active, replyTo: replyTarget?.id, attachments: pendingAttachments })
     setText('')
+    setReplyTarget(null)
+    setPendingAttachments([])
   }
 
   // Helpers for day separators (Discord-like)
@@ -185,6 +236,117 @@ export default function ChatPage(){
     }
     return items
   }, [msgs])
+
+  // Render message text and highlight @mentions. Mentions that match current user's
+  // username get a special "mention-me" class.
+  function renderMessageText(text: string): React.ReactNode {
+    if (!text) return null
+    const parts: React.ReactNode[] = []
+    const re = /@([a-zA-Z0-9_\-]+)/g
+    let lastIndex = 0
+    let m: RegExpExecArray | null
+    let idx = 0
+    while ((m = re.exec(text)) !== null) {
+      const start = m.index
+      const username = m[1]
+      if (start > lastIndex) parts.push(text.slice(lastIndex, start))
+      const isMe = !!(user && user.username && user.username.toLowerCase() === username.toLowerCase())
+      parts.push(
+        <span key={`mention-${idx}-${start}`} className={"mention" + (isMe ? ' mention-me' : '')}>{'@' + username}</span>
+      )
+      lastIndex = re.lastIndex
+      idx++
+    }
+    if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+    return <>{parts.map((p, i) => typeof p === 'string' ? <React.Fragment key={"t-"+i}>{p}</React.Fragment> : p)}</>
+  }
+
+  // Simple cache for event metadata used in inline previews
+  const eventCache = useRef<Map<string, any>>(new Map())
+
+  function EventPreview({ id }: { id: string }){
+    const [ev, setEv] = useState<any|null>(eventCache.current.get(id) || null)
+    useEffect(()=>{
+      if (ev) return
+      let mounted = true
+      fetch('/api/events/' + encodeURIComponent(id), { credentials: 'include' }).then(r=> r.ok ? r.json() : null).then((data:any)=>{ if (!mounted) return; setEv(data); eventCache.current.set(id, data) }).catch(()=>{})
+      return ()=>{ mounted = false }
+    }, [id])
+    if (!ev) return <div className="event-preview" aria-hidden><div style={{width:68,height:68,background:'#eee',borderRadius:8}} /></div>
+    // group availability by status
+    const yes = (ev.availability || []).filter((a:any)=>a.status === 'yes')
+    const no = (ev.availability || []).filter((a:any)=>a.status === 'no')
+    const maybe = (ev.availability || []).filter((a:any)=>a.status === 'maybe')
+    const maxAv = 5
+    const renderAvatars = (arr:any[]) => {
+      const shown = arr.slice(0, maxAv)
+      const more = Math.max(0, arr.length - shown.length)
+      return (
+        <>
+          {shown.map((a:any, i:number)=> (
+            <img key={a.id||a.userId||i} src={a.avatarUrl||`https://api.dicebear.com/7.x/thumbs/svg?seed=${a.username||a.userId||i}`} title={a.username||a.userId} alt={a.username||a.userId} className="vote-avatar" />
+          ))}
+          {more>0 && (
+            <div className="more-count">+{more}</div>
+          )}
+        </>
+      )
+    }
+
+    return (
+      <div className="event-preview" role="group">
+        <img src={ev.idea && ev.idea.imageUrl ? ev.idea.imageUrl : (ev.imageUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${ev.title}`)} alt={ev.title} />
+        <div className="event-preview-body">
+          <div className="event-preview-title">{ev.title}</div>
+          <div className="event-preview-meta">{new Date(ev.date).toLocaleString()} · {ev.location || ''}</div>
+          <div className="event-preview-lists">
+            { (ev.shopping || []).slice(0,3).map((s:any)=> <div key={s.id} className="chip">{s.item}</div>) }
+          </div>
+
+          <div className="event-votes">
+            <div className="vote-group">
+              <div className="vote-label">Oui <span className="vote-count">{yes.length}</span></div>
+              <div className="vote-avatars">
+                {renderAvatars(yes)}
+              </div>
+            </div>
+
+            <div className="vote-group">
+              <div className="vote-label">Non <span className="vote-count">{no.length}</span></div>
+              <div className="vote-avatars">
+                {renderAvatars(no)}
+              </div>
+            </div>
+
+            <div className="vote-group">
+              <div className="vote-label">NSP <span className="vote-count">{maybe.length}</span></div>
+              <div className="vote-avatars">
+                {renderAvatars(maybe)}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Replace #<id> tokens in message text with inline EventPreview components
+  function renderMessageWithEvents(text: string){
+    if (!text) return null
+    const parts: React.ReactNode[] = []
+  const re = /#event:([a-zA-Z0-9\-]+)/g
+    let last = 0; let m: RegExpExecArray | null; let idx = 0
+    while ((m = re.exec(text)) !== null){
+      const start = m.index
+      if (start > last) parts.push(renderMessageText(text.slice(last, start)))
+      const id = m[1]
+      parts.push(<React.Fragment key={'ev-'+idx+'-'+id}><EventPreview id={id} /></React.Fragment>)
+      last = re.lastIndex
+      idx++
+    }
+    if (last < text.length) parts.push(renderMessageText(text.slice(last)))
+    return <>{parts.map((p,i)=> typeof p === 'string' ? <React.Fragment key={'mt-'+i}>{p}</React.Fragment> : p)}</>
+  }
 
   async function openManage(){
     if (!roomDetails) return
@@ -242,6 +404,30 @@ export default function ChatPage(){
     run().catch(()=>{})
     return ()=> ac.abort()
   }, [memberQuery, selectedMembers])
+
+  // Debounced search for events when typing after # token
+  useEffect(()=>{
+    if (!hashQuery) return setShowHashResults(false)
+    // clear previous timer
+    if (hashTimer.current) window.clearTimeout(hashTimer.current)
+    hashTimer.current = window.setTimeout(async ()=>{
+      try {
+        const res = await fetch('/api/events/search?q=' + encodeURIComponent(hashQuery), { credentials: 'include' })
+        if (res.ok) {
+          const data = await res.json()
+          setHashResults(data || [])
+          setShowHashResults((data||[]).length>0)
+        } else {
+          setHashResults([])
+          setShowHashResults(false)
+        }
+      } catch (e) {
+        setHashResults([])
+        setShowHashResults(false)
+      }
+    }, 200)
+    return ()=>{ if (hashTimer.current) window.clearTimeout(hashTimer.current) }
+  }, [hashQuery])
 
   function addMember(u: {id:string; username:string; avatarUrl?:string}){
     if (selectedMembers.find(m=>m.id===u.id)) return
@@ -378,14 +564,57 @@ export default function ChatPage(){
               <span className="line" />
             </div>
           ) : (
-            <div key={item.key} className={`message ${item.msg.senderId===user?.id?'own-message':''}`}>
+            <div key={item.key} className={`message ${item.msg.senderId===user?.id?'own-message':''} ${item.msg.replyTo ? 'has-reply-connector' : ''}`} ref={(el)=>{ if (el) messageRefs.current.set(item.msg.id, el); else messageRefs.current.delete(item.msg.id) }}>
               <img src={item.msg.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${item.msg.senderName||'friend'}`} className="message-avatar" />
+              {item.msg.replyTo && (
+                <div className="message-connector" onClick={()=>{ if (item.msg.replyTo) scrollToMessage(item.msg.replyTo) }}>
+                  <div className="connector-line" />
+                </div>
+              )}
               <div className="message-content">
                 <div className="message-header">
                   <span className="username">{item.msg.senderName||item.msg.senderId.slice(0,6)}</span>
                   <span className="timestamp">{new Date(item.msg.timestamp).toLocaleTimeString()}</span>
                 </div>
-                <div className="message-text">{item.msg.text}</div>
+                {item.msg.replyTo && (
+                  (()=>{
+                    const parent = msgs.find(m=>m.id===item.msg.replyTo)
+                    return (
+                      <>
+                        <div className="message-reply-block" onClick={()=>{ if (item.msg.replyTo) scrollToMessage(item.msg.replyTo) }} role="button" tabIndex={0}>
+                          <div className="reply-bar" aria-hidden="true" />
+                          <div className="reply-body">
+                            <img className="reply-avatar" src={parent?.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${parent?.senderName||'anon'}`} alt={parent?.senderName||'user'} />
+                            <div className="reply-meta">
+                              <div className="reply-username">{parent?.senderName || 'Unknown'}</div>
+                              <div className="reply-snippet">{(parent?.text || '').slice(0,120)}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )
+                  })()
+                )}
+                {/* reply button shown on hover via CSS */}
+                <div className="message-text-row">
+                  <div className="message-text">
+                    {renderMessageWithEvents(item.msg.text)}
+                    {item.msg.attachments && item.msg.attachments.length>0 && (
+                      <div className="message-attachments" style={{marginTop:8, display:'flex', gap:8, flexDirection:'column'}}>
+                        {item.msg.attachments.map((a:any, idx:number)=> (
+                          <div key={idx} style={{display:'flex', alignItems:'center', gap:8}}>
+                            {a.type && a.type.startsWith && a.type.startsWith('image/') ? (
+                              <img src={a.url} style={{width:160,height:100,objectFit:'cover',borderRadius:8}} alt={a.name||'img'} />
+                            ) : (
+                              <a href={a.url} target="_blank" rel="noreferrer" style={{display:'inline-flex',alignItems:'center',gap:8}}>{a.name || 'Fichier'}</a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button className="reply-btn" title="Reply" onClick={()=> setReplyTarget(item.msg)}>↩</button>
+                </div>
                 {/* Visible reaction bar showing existing reactions */}
                 <div className="reaction-bar">
                   {(item.msg.reactions || []).map((r:any) => (
@@ -420,14 +649,82 @@ export default function ChatPage(){
         </div>
         
         <div className="message-input-container">
-          <div className="message-input">
-            <input 
-              value={text} 
-              onChange={(e:any)=>setText(e.target.value)} 
-              placeholder={`Message #${roomDetails?.name || 'general'}`} 
-              onKeyDown={e=>{ if(e.key==='Enter') send() }} 
-            />
-            <button className="send-button" onClick={send} disabled={!text.trim()}>Send</button>
+          <div className="message-input" style={{ position: 'relative' }}>
+            {replyTarget && (
+              <div className="active-reply">
+                <div className="active-reply-left">
+                  <img src={replyTarget.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${replyTarget.senderName||'u'}`} alt="reply" />
+                </div>
+                <div className="active-reply-body">
+                  <div className="active-reply-meta">Replying to <strong>{replyTarget.senderName||replyTarget.senderId.slice(0,6)}</strong></div>
+                  <div className="active-reply-text">{replyTarget.text.slice(0,120)}</div>
+                </div>
+                <button className="active-reply-cancel" onClick={()=>setReplyTarget(null)} title="Cancel reply">×</button>
+              </div>
+            )}
+            <div style={{display:'flex', gap:8, alignItems:'center'}}>
+              <input 
+                ref={inputRef}
+                value={text} 
+                onChange={(e:any)=>{
+                  const v = e.target.value
+                  setText(v)
+                  // detect mention token at end of input
+                  const m = v.match(/(?:^|\s)@([a-zA-Z0-9_\-]{1,})$/)
+                  if (m && roomDetails && (roomDetails as any).members) {
+                    const q = m[1]
+                    setMentionQuery(q)
+                    const members = (roomDetails as any).members as Array<{id:string; username:string; avatarUrl?:string}>
+                    const res = members.filter(u => u.username.toLowerCase().startsWith(q.toLowerCase()) ).slice(0,8)
+                    setMentionResults(res)
+                    setShowMentionResults(res.length>0)
+                  } else {
+                    setShowMentionResults(false)
+                    setMentionQuery('')
+                  }
+                  // detect hash token like #event (start search, debounced)
+                  const h = v.match(/(?:^|\s)#([a-zA-Z0-9_\-]{1,})$/)
+                  if (h) {
+                    const q2 = h[1]
+                    setHashQuery(q2)
+                  } else {
+                    setShowHashResults(false)
+                    setHashQuery('')
+                  }
+                }} 
+                placeholder={`Message #${roomDetails?.name || 'general'}`} 
+                onKeyDown={e=>{ if(e.key==='Enter') { e.preventDefault(); send() } }} 
+                style={{flex:1, height:40, padding:'8px 12px'}}
+              />
+
+              <label className="attach-btn" style={{display:'inline-flex', alignItems:'center', gap:8, cursor:'pointer', height:40, padding:'6px 10px'}}>
+                📎
+                <input type="file" style={{display:'none'}} onChange={async (e:any)=>{
+                  const f = e.target.files?.[0]
+                  if (!f) return
+                  const form = new FormData(); form.append('file', f)
+                  const up = await fetch('/api/upload', { method:'POST', credentials:'include', body: form })
+                  if (!up.ok) return
+                  const data = await up.json()
+                  const url = data.url
+                  setPendingAttachments(prev => [...prev, { url, name: f.name, type: f.type }])
+                  e.target.value = ''
+                }} /></label>
+
+              <button className="send-button" onClick={send} disabled={!(text.trim() || pendingAttachments.length>0)} style={{height:40, padding:'0 14px'}}>Send</button>
+            </div>
+
+            {pendingAttachments.length>0 && (
+              <div style={{display:'flex', gap:8, alignItems:'center', marginTop:8}}>
+                {pendingAttachments.map((a,i)=> (
+                  <div key={i} style={{display:'flex', gap:6, alignItems:'center', background:'#fafafa', padding:'4px 8px', borderRadius:8, border:'1px solid var(--border)'}}>
+                    {a.type && a.type.startsWith('image/') ? <img src={a.url} style={{width:36,height:36,objectFit:'cover',borderRadius:6}} /> : <div style={{width:36,height:36,display:'grid',placeItems:'center',background:'#eee',borderRadius:6}}>{a.name?.split('.').pop()||'F'}</div>}
+                    <div style={{fontSize:12,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.name}</div>
+                    <button onClick={()=> setPendingAttachments(prev => prev.filter((_,j)=>j!==i))} style={{border:'none',background:'transparent',cursor:'pointer'}}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

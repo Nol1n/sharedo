@@ -178,9 +178,14 @@ db.serialize(() => {
     senderId TEXT NOT NULL,
     text TEXT NOT NULL,
     timestamp INTEGER NOT NULL,
+    replyTo TEXT DEFAULT NULL,
     FOREIGN KEY (roomId) REFERENCES rooms(id),
     FOREIGN KEY (senderId) REFERENCES users(id)
   )`);
+  // Add replyTo column for replies if missing (no-op if exists)
+  db.run(`ALTER TABLE messages ADD COLUMN replyTo TEXT DEFAULT NULL`, () => {});
+  // Add attachments column to messages to store JSON list of attachments
+  db.run(`ALTER TABLE messages ADD COLUMN attachments TEXT DEFAULT NULL`, () => {});
   
   db.run(`CREATE TABLE IF NOT EXISTS idea_votes (
     id TEXT PRIMARY KEY,
@@ -1066,6 +1071,27 @@ app.get('/api/events', authRequired, async (req, res) => {
   }
 });
 
+// Search events (autocomplete) by title/description
+app.get('/api/events/search', authRequired, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim()
+    if (!q) return res.json([])
+    const like = '%' + q.replace(/%/g, '') + '%'
+    const rows = await dbAll('SELECT id, title, date, description, ideaId, location, place_lat, place_lng FROM events WHERE title LIKE ? OR description LIKE ? ORDER BY date ASC LIMIT 12', [like, like])
+    const enriched = await Promise.all(rows.map(async (r) => {
+      let imageUrl = null
+      if (r.ideaId) {
+        const idea = await dbGet('SELECT imageUrl FROM ideas WHERE id = ?', [r.ideaId])
+        if (idea) imageUrl = idea.imageUrl || null
+      }
+      return { id: r.id, title: r.title, date: r.date, description: r.description, location: r.location, place_lat: r.place_lat, place_lng: r.place_lng, imageUrl }
+    }))
+    res.json(enriched)
+  } catch (e) {
+    res.status(500).json({ error: 'Database error' })
+  }
+})
+
 // Public events list for development (no auth). Disabled in production.
 app.get('/api/events/public', async (req, res) => {
   if (process.env.NODE_ENV === 'production') return res.status(404).json({ error: 'Not found' })
@@ -1295,7 +1321,9 @@ app.get('/api/rooms/:id/messages', authRequired, async (req, res) => {
       const mine = await dbAll('SELECT emoji FROM reactions WHERE targetType = ? AND targetId = ? AND userId = ?', ['message', m.id, req.user.id]);
       const mineSet = new Set(mine.map(r=>r.emoji));
       const reactions = aggs.map(a => ({ emoji: a.emoji, count: a.c, reactedByMe: mineSet.has(a.emoji) }));
-      result.push({ ...m, senderName: u?.username || 'Unknown', avatarUrl: u?.avatarUrl || '', reactions });
+      let atts = []
+      try { atts = m.attachments ? JSON.parse(m.attachments) : [] } catch(e) { atts = [] }
+      result.push({ ...m, senderName: u?.username || 'Unknown', avatarUrl: u?.avatarUrl || '', reactions, attachments: atts });
     }
     res.json(result);
   } catch (e) {
@@ -1436,13 +1464,15 @@ io.on('connection', (socket) => {
   socket.on('chat:newMessage', async (data) => {
     const text = String(data?.text || '').slice(0, 2000);
     const roomId = data?.roomId || 'general';
+    const replyTo = data?.replyTo || null
+    const attachments = Array.isArray(data?.attachments) ? data.attachments : []
     const member = await dbGet('SELECT 1 FROM room_members WHERE roomId = ? AND userId = ?', [roomId, socket.user.id]).catch(()=>null);
     if (!member) return;
     const id = uuidv4();
     const timestamp = Date.now();
-    await dbRun('INSERT INTO messages (id, roomId, senderId, text, timestamp) VALUES (?, ?, ?, ?, ?)', [id, roomId, socket.user.id, text, timestamp]);
+    await dbRun('INSERT INTO messages (id, roomId, senderId, text, timestamp, replyTo, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)', [id, roomId, socket.user.id, text, timestamp, replyTo, JSON.stringify(attachments || [])]);
     const u = await dbGet('SELECT username, avatarUrl FROM users WHERE id = ?', [socket.user.id]).catch(()=>null);
-    const payload = { id, roomId, senderId: socket.user.id, text, timestamp, senderName: u?.username || 'Unknown', avatarUrl: u?.avatarUrl || '' };
+    const payload = { id, roomId, senderId: socket.user.id, text, timestamp, replyTo, attachments: attachments || [], senderName: u?.username || 'Unknown', avatarUrl: u?.avatarUrl || '' };
     io.to('room:' + roomId).emit('chat:message', payload);
     // Detect mentions like @username and emit notification to mentioned users
     const mentionMatches = Array.from(new Set((text.match(/@([a-zA-Z0-9_\-]+)/g) || []).map(m => m.slice(1))));

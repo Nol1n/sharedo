@@ -18,7 +18,7 @@ function Protected({ children }: { children: any }) {
 function Layout() {
   const { user, logout } = useAuth()
   const nav = useNavigate()
-  const { clear, count } = useNotifications()
+  const { clear, count, messageCount, clearMessages } = useNotifications()
   return (
     <div className="app">
       <aside className="sidebar">
@@ -30,8 +30,8 @@ function Layout() {
           <Link to="/moodboard">Moodboard</Link>
           <Link to="/calendar">Calendar</Link>
           <Link to="/map">Map</Link>
-            <Link to="/chat" className="sidebar-link" onClick={() => { clear(); }}>
-              Chat {count > 0 && <span className="nav-badge">{count}</span>}
+            <Link to="/chat" className="sidebar-link" onClick={() => { clearMessages(); }}>
+              Chat {messageCount > 0 && <span className="nav-badge">{messageCount}</span>}
             </Link>
           <Link to="/profile">Profile</Link>
         </nav>
