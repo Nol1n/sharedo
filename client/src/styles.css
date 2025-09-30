@@ -952,6 +952,13 @@ button.danger:hover {
 .hash-result-item img { width:44px; height:44px; border-radius:8px; object-fit:cover }
 .hash-result-item:hover { background: rgba(0,0,0,0.03) }
 
+/* Debug helper to make temporary debug dropdowns visible — solid yellow contour */
+.debug-outline {
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(212,175,55,0.14);
+}
+
 /* Attachments in chat input and messages */
 .attach-btn input { display: none }
 .message-attachments img { border-radius:8px; border:1px solid var(--border) }

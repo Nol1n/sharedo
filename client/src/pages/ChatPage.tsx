@@ -668,14 +668,17 @@ export default function ChatPage(){
                 value={text} 
                 onChange={(e:any)=>{
                   const v = e.target.value
+                  console.debug('[chat] input onChange, text=', v)
                   setText(v)
                   // detect mention token at end of input
                   const m = v.match(/(?:^|\s)@([a-zA-Z0-9_\-]{1,})$/)
                   if (m && roomDetails && (roomDetails as any).members) {
                     const q = m[1]
+                    console.debug('[chat] mention token detected, q=', q, 'membersCount=', (roomDetails as any).members.length)
                     setMentionQuery(q)
                     const members = (roomDetails as any).members as Array<{id:string; username:string; avatarUrl?:string}>
                     const res = members.filter(u => u.username.toLowerCase().startsWith(q.toLowerCase()) ).slice(0,8)
+                    console.debug('[chat] mention results:', res.map(r=>r.username))
                     setMentionResults(res)
                     setShowMentionResults(res.length>0)
                   } else {
@@ -686,6 +689,7 @@ export default function ChatPage(){
                   const h = v.match(/(?:^|\s)#([a-zA-Z0-9_\-]{1,})$/)
                   if (h) {
                     const q2 = h[1]
+                    console.debug('[chat] hash token detected, q=', q2)
                     setHashQuery(q2)
                   } else {
                     setShowHashResults(false)
@@ -696,6 +700,41 @@ export default function ChatPage(){
                 onKeyDown={e=>{ if(e.key==='Enter') { e.preventDefault(); send() } }} 
                 style={{flex:1, height:40, padding:'8px 12px'}}
               />
+
+              {/* Debug: mention autocomplete dropdown (temporary) */}
+              {showMentionResults && mentionResults.length>0 && (
+                <div className="mention-results debug-outline" style={{position:'absolute', bottom:54, left:8, background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:6, boxShadow:'0 6px 18px rgba(0,0,0,0.08)', zIndex:40, width:320, maxHeight:240, overflow:'auto'}}>
+                  {mentionResults.map(u=> (
+                    <div key={u.id} onClick={()=>selectMention(u)} style={{display:'flex',gap:8,alignItems:'center',padding:'8px',cursor:'pointer'}}>
+                      <img src={u.avatarUrl || `https://api.dicebear.com/7.x/thumbs/svg?seed=${u.username}`} alt={u.username} style={{width:28,height:28,borderRadius:6}} />
+                      <div style={{fontSize:13}}>{u.username}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Debug: hash/event autocomplete dropdown (temporary) */}
+              {showHashResults && hashResults.length>0 && (
+                <div className="hash-results debug-outline" style={{position:'absolute', bottom:54, left:8, background:'white', border:'1px solid rgba(0,0,0,0.12)', borderRadius:6, boxShadow:'0 6px 18px rgba(0,0,0,0.08)', zIndex:40, width:360, maxHeight:300, overflow:'auto'}}>
+                  {hashResults.map((ev:any)=> (
+                    <div key={ev.id} onClick={async ()=>{
+                      // insert token into input
+                      const before = text.replace(/(?:^|\s)#([a-zA-Z0-9_\-]{1,})$/, (m,p1)=> { const prefix = m.startsWith('#') ? '' : m.slice(0, m.indexOf('#')); return (prefix?prefix+' ':'') + '#event:' + ev.id + ' ' })
+                      setText(before)
+                      setShowHashResults(false)
+                      setHashQuery('')
+                      // focus back
+                      setTimeout(()=> inputRef.current?.focus(), 0)
+                    }} style={{display:'flex',gap:10,alignItems:'center',padding:'8px',cursor:'pointer'}}>
+                      <img src={ev.imageUrl || (ev.idea && ev.idea.imageUrl) || `https://api.dicebear.com/7.x/thumbs/svg?seed=${ev.title}`} alt={ev.title} style={{width:44,height:44,borderRadius:6,objectFit:'cover'}} />
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:600}}>{ev.title}</div>
+                        <div style={{fontSize:12,color:'var(--muted)'}}>{ev.date ? new Date(ev.date).toLocaleString() : ''} {ev.location? '· '+ev.location : ''}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <label className="attach-btn" style={{display:'inline-flex', alignItems:'center', gap:8, cursor:'pointer', height:40, padding:'6px 10px'}}>
                 📎

@@ -557,9 +557,11 @@ app.post('/api/register', async (req, res) => {
         
         // Auto-join General room
         db.run('INSERT OR IGNORE INTO room_members (roomId, userId) VALUES (?, ?)', ['general', userId]);
-        
-        const token = jwt.sign({ id: userId, username }, JWT_SECRET, { expiresIn: '7d' });
-        res.cookie('token', token, { httpOnly: true, sameSite: 'lax' });
+
+        // IMPORTANT: do NOT auto-login the user here. Account creation should not bypass
+        // the PIN/code login flow. Return created user info but do not issue a session
+        // token or set a cookie. The client must call /api/login with the server code to
+        // obtain an authenticated session.
         res.json({ id: userId, username, email, avatarUrl: '' });
       });
   });

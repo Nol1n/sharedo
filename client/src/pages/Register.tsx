@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { type ChangeEvent, type FormEvent, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
 
@@ -41,7 +41,7 @@ export default function Register() {
     return true
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     
     if (!validateForm()) return
@@ -51,7 +51,9 @@ export default function Register() {
     
     try {
       await register(username, email, password)
-      nav('/moodboard')
+      // After successful registration, do not auto-login. Redirect to Login page
+      // so the user must authenticate with the server PIN/code.
+      nav('/login', { state: { message: 'Account created. Please sign in with the server access code.' } })
     } catch (e: any) {
       setError(e.message || 'Registration failed')
     } finally {
@@ -95,7 +97,7 @@ export default function Register() {
                 type="text"
                 placeholder="Choose a username"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)}
                 className="auth-input"
                 disabled={isLoading}
               />
@@ -111,7 +113,7 @@ export default function Register() {
                 type="email"
                 placeholder="Enter your email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
                 className="auth-input"
                 disabled={isLoading}
               />
@@ -127,7 +129,7 @@ export default function Register() {
                 type="password"
                 placeholder="Create a password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
                 className="auth-input"
                 disabled={isLoading}
               />
@@ -143,7 +145,7 @@ export default function Register() {
                 type="password"
                 placeholder="Confirm your password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setConfirmPassword(e.target.value)}
                 className="auth-input"
                 disabled={isLoading}
               />

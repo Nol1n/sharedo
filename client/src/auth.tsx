@@ -56,8 +56,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function register(username: string, email: string, password: string) {
     disconnectSocket() // Disconnect old socket before register
     const res = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ username, email, password }) })
-    if (!res.ok) throw new Error('Register failed')
-    await refreshProfile()
+    if (!res.ok) {
+      let msg = 'Register failed'
+      try { const data = await res.json(); if (data && data.error) msg = data.error } catch (e) {}
+      throw new Error(msg)
+    }
+    // Do not automatically refresh profile here; registration must not auto-login.
+    // Let the Register page show a success message and direct the user to the login flow.
   }
   async function logout() {
     await fetch('/api/logout', { method: 'POST', credentials: 'include' })

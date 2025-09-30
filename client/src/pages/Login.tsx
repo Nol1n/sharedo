@@ -1,14 +1,16 @@
 import { type ChangeEvent, type FormEvent, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth'
 
 export default function Login() {
   const { login } = useAuth()
   const nav = useNavigate()
+  const location = useLocation()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
+  const infoMessage = (location.state as any)?.message || ''
   const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = async (e: FormEvent) => {
@@ -51,6 +53,11 @@ export default function Login() {
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
+          {infoMessage && (
+            <div className="auth-info" style={{ background: '#fff9e6', border: '1px solid #f0e0b4', padding: 10, borderRadius: 8, marginBottom: 10 }}>
+              {infoMessage}
+            </div>
+          )}
           {error && (
             <div className="auth-error">
               <span className="error-icon">⚠️</span>
